@@ -1,3 +1,5 @@
+use std::{collections::HashMap, fs::File, u8};
+
 
 #[derive(Debug)]
 struct rle<T> {
@@ -85,25 +87,69 @@ impl Range {
 }
 
 #[derive(Debug)]
-pub struct Ranges {
+pub struct GenomicRanges {
     seqnames: rle<Seqnames>,
-    range: Vec<Range>,
+    start: Vec<u64>,
+    end: Vec<u64>,
+    width: Vec<u64>,
     strand: rle<Strand>
 }
 
-impl Ranges {
-    fn new(seqnames: Vec<&str>, range: Vec<Range>, strand: Vec<&str>) -> Self {
+impl GenomicRanges {
+    fn new(seqnames: Vec<String>, start: Vec<String>, end: Vec<String>) -> Self {
         let mut rle_seq: rle<Seqnames> = rle::<Seqnames>::new();
         let mut rle_std: rle<Strand> = rle::<Strand>::new();
+        let strand = vec![String::from("*"); start.len()];
         rle_seq.encode_rle(Seqnames::str_to_enum(seqnames));
         rle_std.encode_rle(Strand::str_to_enum(strand));
-        Ranges {
+        let ranges_start: Vec<u64> = start
+            .iter()
+            .map(|element| element.parse().expect("cannot parse start"))
+            .collect();
+        let ranges_end: Vec<u64> = end
+            .iter()
+            .map(|element| element.parse().expect("cannot parse end"))
+            .collect();
+        let mut width: Vec<u64> = vec![0; start.len()];
+        for it in 0..start.len() {
+            let end_it = end[it].parse::<u64>().expect("cannot parse end");
+            let start_it = start[it].parse::<u64>().expect("cannot parse start");
+            if end_it < start_it {
+                println!("End less than start at row {it}");
+                std::process::exit(1);
+            }
+            width[it] = end_it - start_it;
+        }
+        GenomicRanges {
             seqnames: rle_seq, 
-            range,
+            start: ranges_start,
+            end: ranges_end,
+            width,
             strand: rle_std,
         }
     }
 
+    fn parse_delim_file(file_path: &str, delimiter: &str, has_header: bool) -> Self {
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(delimiter.as_bytes()[0])
+            .has_headers(has_header)
+            .from_path(file_path)
+            .expect(format!("cannot open file at path: {file_path}").as_str());
+
+        // assuming the first 3 columns are like this
+        let mut seqnames: Vec<String> = Vec::new();
+        let mut start: Vec<String> = Vec::new();
+        let mut end: Vec<String> = Vec::new();
+        for result in reader.records() {
+            let record = result.expect("Failed to get record row!");
+            seqnames.push(record[0].to_string());
+            start.push(record[1].to_string());
+            end.push(record[2].to_string());
+        }
+
+        self::GenomicRanges::new(seqnames, start, end)
+
+    }
 }
 
 
@@ -149,15 +195,15 @@ enum Strand {
 
 
 trait SeqnamesStrand<T> {
-    fn str_to_enum(element: Vec<&str>) -> Vec<T>;
+    fn str_to_enum(element: Vec<String>) -> Vec<T>;
 }
 
 impl SeqnamesStrand<Seqnames> for Seqnames {
-    fn str_to_enum(element: Vec<&str>) -> Vec<Seqnames> {
+    fn str_to_enum(element: Vec<String>) -> Vec<Seqnames> {
         let mut element_vec = vec![Seqnames::Chr1; element.len()];
 
         for (idx, chr) in element.iter().enumerate() {
-            element_vec[idx] = match *chr {
+            element_vec[idx] = match chr.as_str() {
                 "chr1" => Seqnames::Chr1,
                 "chr2" => Seqnames::Chr2,
                 "chr3" => Seqnames::Chr3,
@@ -193,11 +239,11 @@ impl SeqnamesStrand<Seqnames> for Seqnames {
 }
 
 impl SeqnamesStrand<Strand> for Strand {
-    fn str_to_enum(element: Vec<&str>) -> Vec<Strand> {
+    fn str_to_enum(element: Vec<String>) -> Vec<Strand> {
         let mut element_vec = vec![Strand::Forward; element.len()];
 
         for (idx, chr) in element.iter().enumerate() {
-            element_vec[idx] = match *chr {
+            element_vec[idx] = match chr.as_str() {
                 "+" => Strand::Forward,
                 "-" => Strand::Reverse,
                 _ => Strand::Unk
@@ -215,6 +261,7 @@ mod tests{
 
     use super::*;
 
+    /*
     #[test]
     fn init_ranges() {
         let ranges1 = Range::new(vec![0, 1, 2, 3], vec![10, 11, 12, 13]);
@@ -227,5 +274,11 @@ mod tests{
             vec!["-", "-", "-", "+", "s"]
         );
         println!("{:?}", rs_ranges);
+    }
+    */
+    #[test]
+    fn read_tsv_file() {
+        let gro = GenomicRanges::parse_delim_file("sample.tsv", "\t", false);
+        println!("{:?}", gro);
     }
 }
